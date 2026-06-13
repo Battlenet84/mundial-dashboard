@@ -472,6 +472,64 @@ def raw_rows_from_manual_file(path: Path) -> list[dict[str, Any]]:
     return out
 
 
+# Per-process cache so each source JSON file is read at most once per run.
+_raw_json_file_cache: dict[str, Any] = {}
+
+
+def _lookup_outcome_from_source_file(
+    source_file: str | None,
+    bookmaker: str,
+    market_index: Any,
+    odds_index: Any,
+) -> dict[str, Any]:
+    """Re-read the raw bookmaker JSON to recover outcome.label (the player name).
+
+    The normalized CSV stores selection_name = "Over N" and discards the
+    outcome.label that identifies the player.  The CSV does store
+    raw_market_index, raw_odds_index and source_file, which together let us
+    look up the exact outcome dict from the original JSON.
+
+    Returns {} on any failure so the caller falls back silently.
+    """
+    if not source_file:
+        return {}
+    try:
+        mi = int(market_index)
+        oi = int(odds_index)
+    except (TypeError, ValueError):
+        return {}
+
+    if source_file not in _raw_json_file_cache:
+        p = Path(source_file)
+        if not p.exists():
+            return {}
+        try:
+            wrapper = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        _raw_json_file_cache[source_file] = wrapper
+
+    wrapper = _raw_json_file_cache[source_file]
+    resp = wrapper.get("response_json") if isinstance(wrapper, dict) else wrapper
+    if not isinstance(resp, dict):
+        return {}
+    bm_data = resp.get("bookmakers", {})
+    if not isinstance(bm_data, dict):
+        return {}
+    # Try exact bookmaker key, then a "(no latency)" variant Bet365 sometimes uses.
+    markets = bm_data.get(bookmaker) or bm_data.get(bookmaker + " (no latency)") or []
+    if not isinstance(markets, list) or mi >= len(markets):
+        return {}
+    market = markets[mi]
+    if not isinstance(market, dict):
+        return {}
+    outcomes = market.get("odds") if isinstance(market.get("odds"), list) else market.get("outcomes", [])
+    if not isinstance(outcomes, list) or oi >= len(outcomes):
+        return {}
+    outcome = outcomes[oi]
+    return outcome if isinstance(outcome, dict) else {}
+
+
 def raw_rows_from_odds_api_cache(path: Path = ODDS_API_CACHE) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -482,9 +540,29 @@ def raw_rows_from_odds_api_cache(path: Path = ODDS_API_CACHE) -> list[dict[str, 
         odds = to_float(row.get("odds_decimal"))
         if odds is None or odds <= 1:
             continue
+        bookmaker = row.get("bookmaker") or "Bet365"
+        # Recover the original outcome dict from the raw JSON so that
+        # extract_label_from_raw() can resolve outcome.label (the player name).
+        # The CSV stores raw_market_index, raw_odds_index and source_file for
+        # exactly this purpose; without this recovery, all player prop rows are
+        # UNMATCHED because selection_name is only "Over N" / "Under N".
+        outcome = _lookup_outcome_from_source_file(
+            row.get("source_file"),
+            bookmaker,
+            row.get("raw_market_index"),
+            row.get("raw_odds_index"),
+        )
+        raw_payload = json.dumps(
+            {
+                "market_index": row.get("raw_market_index"),
+                "odds_index": row.get("raw_odds_index"),
+                "outcome": outcome,
+            },
+            ensure_ascii=False,
+        )
         out.append({
             "source_name": "odds_api_io_cache", "run_name": "odds_api_io_cache",
-            "bookmaker": row.get("bookmaker") or "Bet365",
+            "bookmaker": bookmaker,
             "match_name": f"{row.get('home')} vs {row.get('away')}",
             "event_id": row.get("event_id"), "api_event_id": row.get("event_id"),
             "statshub_event_id": None,
@@ -494,7 +572,7 @@ def raw_rows_from_odds_api_cache(path: Path = ODDS_API_CACHE) -> list[dict[str, 
             "raw_line": to_float(row.get("line")), "raw_odds": odds,
             "odds_format": "decimal",
             "captured_at": row.get("fetched_at_utc") or now_utc(),
-            "raw_payload": json.dumps(row, ensure_ascii=False),
+            "raw_payload": raw_payload,
             "source_url": row.get("source_file"), "request_id": None,
             "raw_file": row.get("source_file"), "status": "raw",
             "notes": "Imported from cached Odds-API.io normalized CSV",
@@ -678,7 +756,7 @@ def _classify_market(market_l: str, teams: tuple[str, ...]) -> tuple[str, bool, 
     ):
         return "total_corners", False, False
     if "alternative corners" in market_l:
-        return "team_corners", True, False
+        return "total_corners", False, False
     if "corners race" in market_l:
         return "corners_race", False, False
     if "total corners" in market_l:
