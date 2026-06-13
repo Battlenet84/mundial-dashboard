@@ -22,3 +22,7 @@ data/processed/*
 .DS_Store
 .vscode/
 .idea/
+
+data/mundial.db
+data/mundial_*.db
+!data/mundial.db.gz

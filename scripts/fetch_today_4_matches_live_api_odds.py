@@ -801,8 +801,19 @@ def run_pipeline(
     bookmaker: str,
     bookmaker_check_status: str,
     from_raw: bool,
+    allow_partial: bool = False,
 ) -> None:
     """Insert all match raw rows, normalize, calculate EV, write workbook."""
+    # Safety guard: refuse to overwrite a multi-match DB with single-match data.
+    matches_with_data = [r for r, rows, _ in all_match_data if rows]
+    if len(matches_with_data) == 1 and not allow_partial:
+        match_name = matches_with_data[0]["match_name"]
+        raise SystemExit(
+            f"SAFETY GUARD: only 1 match has raw odds data ({match_name!r}).\n"
+            "This would overwrite the full DB with a single-match run.\n"
+            "Pass --allow-partial to override, or ensure all match raw files are present."
+        )
+
     with connect() as con:
         ensure_schema(con)
         # Replace all existing data for this pipeline run
@@ -909,7 +920,7 @@ def run_pipeline(
 # Live mode
 # ---------------------------------------------------------------------------
 
-def run_live() -> None:
+def run_live(allow_partial: bool = False) -> None:
     config = load_config()
     if not is_configured_api_key(config.api_key):
         raise SystemExit("live API odds unavailable: ODDS_API_IO_KEY not configured in .env")
@@ -1047,7 +1058,7 @@ def run_live() -> None:
 
     run_pipeline(
         all_match_data, raw_sources, selected_before,
-        bookmaker, bookmaker_check_status, from_raw=False,
+        bookmaker, bookmaker_check_status, from_raw=False, allow_partial=allow_partial,
     )
 
 
@@ -1055,7 +1066,7 @@ def run_live() -> None:
 # Rebuild from raw files
 # ---------------------------------------------------------------------------
 
-def run_from_raw() -> None:
+def run_from_raw(allow_partial: bool = False) -> None:
     print("=" * 70)
     print("MODE: rebuild from existing raw files")
 
@@ -1205,7 +1216,7 @@ def run_from_raw() -> None:
 
     run_pipeline(
         all_match_data, raw_sources, selected_before,
-        bookmaker, "from_raw_files", from_raw=True,
+        bookmaker, "from_raw_files", from_raw=True, allow_partial=allow_partial,
     )
 
 
@@ -1221,11 +1232,15 @@ def main() -> None:
         "--from-raw", action="store_true",
         help="Rebuild pipeline from existing raw JSON files (no API calls)",
     )
+    parser.add_argument(
+        "--allow-partial", action="store_true",
+        help="Allow overwriting DB even when only 1 match has raw data (bypasses safety guard)",
+    )
     args = parser.parse_args()
     if args.from_raw:
-        run_from_raw()
+        run_from_raw(allow_partial=args.allow_partial)
     else:
-        run_live()
+        run_live(allow_partial=args.allow_partial)
 
 
 if __name__ == "__main__":

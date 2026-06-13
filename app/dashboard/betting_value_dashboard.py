@@ -27,6 +27,7 @@ from app.betting.odds_driven import (
     PRIORITY_CLASS_MAP,
     calculate_ev,
     connect,
+    ensure_db_available,
     insert_raw_rows,
     normalize_raw_odds,
     raw_rows_from_manual_file,
@@ -36,6 +37,19 @@ from app.betting.odds_driven import (
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
+# ---------------------------------------------------------------------------
+# DB bootstrap — decompress .gz seed if raw DB is absent
+# ---------------------------------------------------------------------------
+
+def ensure_mundial_db_available() -> bool:
+    """Decompress data/mundial.db.gz → data/mundial.db if the DB is missing.
+
+    Delegates to ensure_db_available() in odds_driven.py (which carries no
+    Streamlit dependency and is independently testable).
+    """
+    return ensure_db_available()
 
 KNOWN_RUNS = [
     "today_4_matches_live_api_odds_probe",
@@ -1683,6 +1697,8 @@ def render_best_bets_hero(match_filter: str | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    decompressed = ensure_mundial_db_available()
+
     st.set_page_config(
         page_title="Betting Value Dashboard",
         page_icon="📈",
@@ -1691,6 +1707,9 @@ def main() -> None:
     )
     require_optional_password()
     _inject_mobile_css()
+
+    if decompressed:
+        st.info("Database restored from compressed seed (data/mundial.db.gz).", icon="ℹ️")
 
     # Reserve the top slot for the hero cards; fill it after the sidebar
     # filters are known so the cards can respect the selected match.

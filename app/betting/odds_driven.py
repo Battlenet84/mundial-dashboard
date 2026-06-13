@@ -264,6 +264,40 @@ def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def ensure_db_available(db_path: Path | None = None) -> bool:
+    """Decompress <db>.gz → <db> if the database file is absent.
+
+    Called at dashboard startup so the app self-bootstraps from the committed
+    compressed seed without requiring a manual extraction step.
+
+    Returns True if decompression happened, False if the DB was already present
+    or if no .gz seed exists.  Never overwrites an existing DB.
+    """
+    import gzip
+    import shutil
+
+    resolved = Path(db_path) if db_path is not None else DB_PATH
+    gz = Path(str(resolved) + ".gz")
+
+    if resolved.exists():
+        return False
+    if not gz.exists():
+        return False
+
+    print(f"[bootstrap] {gz.name} -> {resolved.name} ...", flush=True)
+    tmp = resolved.parent / (resolved.name + ".tmp")
+    try:
+        with gzip.open(gz, "rb") as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        tmp.rename(resolved)
+    except Exception:
+        if tmp.exists():
+            tmp.unlink()
+        raise
+    print(f"[bootstrap] done ({resolved.stat().st_size // (1024 * 1024)} MB)", flush=True)
+    return True
+
+
 def connect() -> sqlite3.Connection:
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
