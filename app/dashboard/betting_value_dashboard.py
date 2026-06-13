@@ -1215,6 +1215,459 @@ def page_event_resolution() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Best Bets — mobile-first hero cards
+# ---------------------------------------------------------------------------
+
+_MOBILE_CSS = """
+<style>
+/* ---- Layout: tighter, mobile-friendly canvas ---- */
+.block-container {
+    padding-top: 1.1rem;
+    padding-bottom: 3rem;
+    max-width: 1180px;
+}
+@media (max-width: 640px) {
+    .block-container { padding-left: 0.75rem; padding-right: 0.75rem; }
+}
+/* Make Streamlit tabs swipe horizontally instead of wrapping on small screens */
+.stTabs [data-baseweb="tab-list"] {
+    overflow-x: auto;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+}
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { height: 4px; }
+.stTabs [data-baseweb="tab"] { white-space: nowrap; }
+
+/* ---- Hero header ---- */
+.bb-hero {
+    background: linear-gradient(135deg, #0f766e 0%, #115e59 45%, #134e4a 100%);
+    border-radius: 22px;
+    padding: 22px 22px 20px;
+    margin: 4px 0 22px;
+    color: #ecfdf5;
+    box-shadow: 0 14px 36px -16px rgba(15,118,110,0.65);
+    position: relative;
+    overflow: hidden;
+}
+.bb-hero::after {
+    content: "";
+    position: absolute;
+    top: -60px; right: -40px;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(45,212,191,0.35) 0%, rgba(45,212,191,0) 70%);
+}
+.bb-hero__kicker {
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: #99f6e4;
+    margin: 0;
+}
+.bb-hero__title {
+    font-size: 1.7rem;
+    font-weight: 800;
+    margin: 4px 0 6px;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+}
+.bb-hero__sub {
+    font-size: 0.9rem;
+    margin: 0;
+    color: #ccfbf1;
+    opacity: 0.95;
+}
+
+/* ---- Category band ---- */
+.bb-band { margin: 0 0 22px; }
+.bb-band__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 2px 12px;
+}
+.bb-band__dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+.bb-band__name {
+    font-size: 1.12rem;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0;
+    letter-spacing: -0.01em;
+}
+.bb-band__tag {
+    font-size: 0.74rem;
+    color: #64748b;
+    font-weight: 600;
+    margin-left: auto;
+    text-align: right;
+}
+
+/* ---- Card grid ---- */
+.bb-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 14px;
+}
+@media (max-width: 640px) {
+    .bb-grid { grid-template-columns: 1fr; gap: 12px; }
+}
+
+/* ---- Card ---- */
+.bb-card {
+    position: relative;
+    background: #ffffff;
+    border: 1px solid #e8edf2;
+    border-radius: 18px;
+    padding: 16px 16px 14px;
+    box-shadow: 0 10px 26px -20px rgba(15,23,42,0.45);
+    overflow: hidden;
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+.bb-card:hover { transform: translateY(-3px); box-shadow: 0 18px 34px -20px rgba(15,23,42,0.5); }
+.bb-card::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 5px;
+    background: var(--accent);
+}
+.bb-card__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.bb-card__match {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.bb-card__badge {
+    font-size: 0.64rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #fff;
+    background: var(--accent);
+    padding: 3px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+.bb-card__subject {
+    font-size: 1.16rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.18;
+    letter-spacing: -0.01em;
+    margin: 0 0 3px;
+}
+.bb-card__market {
+    font-size: 0.88rem;
+    color: #475569;
+    font-weight: 600;
+    margin: 0 0 14px;
+}
+.bb-card__stats {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.bb-card__odds-label,
+.bb-card__prob-label {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #94a3b8;
+    font-weight: 700;
+    margin: 0 0 2px;
+}
+.bb-card__odds-val {
+    font-size: 2rem;
+    font-weight: 850;
+    color: #0f172a;
+    line-height: 1;
+    letter-spacing: -0.03em;
+}
+.bb-card__prob { flex: 1 1 auto; min-width: 0; }
+.bb-card__prob-val {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--accent-strong);
+    line-height: 1;
+}
+.bb-bar {
+    margin-top: 6px;
+    height: 7px;
+    border-radius: 999px;
+    background: #eef2f6;
+    overflow: hidden;
+}
+.bb-bar__fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--accent);
+}
+.bb-card__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-top: 1px dashed #eef2f6;
+    padding-top: 10px;
+}
+.bb-card__ev {
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: var(--accent-strong);
+}
+.bb-card__pay {
+    font-size: 0.74rem;
+    color: #64748b;
+    font-weight: 600;
+}
+.bb-card__pay b { color: #0f172a; font-weight: 800; }
+</style>
+"""
+
+# tier_key -> (label, tagline, accent, accent_strong, dot, badge_text)
+_TIER_META = {
+    "comun": {
+        "label": "Comunes",
+        "tag": "Las más probables · menor riesgo",
+        "accent": "linear-gradient(135deg,#34d399,#059669)",
+        "accent_strong": "#059669",
+        "dot": "#10b981",
+        "badge": "Común",
+    },
+    "moderada": {
+        "label": "Moderadas",
+        "tag": "Riesgo equilibrado",
+        "accent": "linear-gradient(135deg,#fbbf24,#d97706)",
+        "accent_strong": "#d97706",
+        "dot": "#f59e0b",
+        "badge": "Moderada",
+    },
+    "arriesgada": {
+        "label": "Arriesgadas",
+        "tag": "Baja probabilidad · gran pago",
+        "accent": "linear-gradient(135deg,#fb7185,#e11d48)",
+        "accent_strong": "#e11d48",
+        "dot": "#f43f5e",
+        "badge": "Arriesgada",
+    },
+}
+
+_MARKET_ES = {
+    "player_shots_on_target": "remates al arco",
+    "player_total_shots": "remates totales",
+    "player_assists": "asistencias",
+    "player_tackles": "entradas",
+    "player_passes": "pases",
+    "player_fouls": "faltas",
+    "team_total_shots": "remates del equipo",
+    "team_shots_on_target": "remates al arco del equipo",
+    "match_total_goals": "goles del partido",
+    "over_under_goals": "goles del partido",
+    "match_result": "resultado",
+}
+
+
+def _inject_mobile_css() -> None:
+    st.markdown(_MOBILE_CSS, unsafe_allow_html=True)
+
+
+def _prettify_name(value) -> str:
+    text = _clean_label_value(value)
+    if not text:
+        return ""
+    return text.title()
+
+
+def _card_subject(row: pd.Series) -> str:
+    player = _prettify_name(row.get("player_name"))
+    if player:
+        return player
+    if _clean_label_value(row.get("market_scope")) == "match":
+        return "Total de goles"
+    team = _clean_label_value(row.get("team_name"))
+    if team:
+        return team
+    return _clean_label_value(row.get("match_name")) or "Apuesta"
+
+
+def _card_market_label(row: pd.Series) -> str:
+    market = (
+        _clean_label_value(row.get("canonical_market_type"))
+        or _clean_label_value(row.get("market_type"))
+    )
+    market_es = _MARKET_ES.get(market)
+    if not market_es:
+        market_es = _readable_market_name(row).lower()
+    side = _clean_label_value(row.get("side")).lower()
+    side_es = {"over": "Más de", "under": "Menos de"}.get(side, side.title())
+    line = _format_line(row.get("line"))
+    parts = [p for p in [side_es, line, market_es] if p]
+    return " ".join(parts).strip() or "Apuesta de valor"
+
+
+@st.cache_data(ttl=10)
+def _best_bets_source() -> pd.DataFrame:
+    """Actionable VALUE bets, independent of sidebar filters, for the hero cards."""
+    if not table_exists("betting_value_scores_new"):
+        return pd.DataFrame()
+    try:
+        return qdf(
+            """
+            SELECT match_name, market_type, canonical_market_type, market_scope,
+                   team_name, player_name, side, line, odds_decimal,
+                   model_probability, expected_value, sample_size
+            FROM betting_value_scores_new
+            WHERE verdict='VALUE'
+              AND expected_value > 0
+              AND probability_status='ok'
+              AND market_mapping_status='OK'
+              AND exact_market_match=1
+              AND COALESCE(model_uses_proxy,0)=0
+              AND COALESCE(field_mapping_status,'OK') NOT IN ('WRONG','MISSING_FIELD')
+              AND COALESCE(side_line_status,'OK')='OK'
+              AND model_probability IS NOT NULL
+              AND odds_decimal IS NOT NULL
+            ORDER BY expected_value DESC
+            """
+        )
+    except Exception:
+        return pd.DataFrame()
+
+
+def _select_best_bets(df: pd.DataFrame, per_tier: int = 2) -> dict[str, list[dict]]:
+    """Bucket VALUE bets into comunes / moderadas / arriesgadas by hit probability."""
+    out: dict[str, list[dict]] = {"comun": [], "moderada": [], "arriesgada": []}
+    if df is None or df.empty:
+        return out
+
+    d = df.copy()
+    d["p"] = pd.to_numeric(d["model_probability"], errors="coerce")
+    d["ev"] = pd.to_numeric(d["expected_value"], errors="coerce")
+    d["odds"] = pd.to_numeric(d["odds_decimal"], errors="coerce")
+    d = d.dropna(subset=["p", "ev", "odds"])
+    if d.empty:
+        return out
+
+    # Within each probability band, surface the highest expected-value bets so the
+    # "comunes" are safe AND worthwhile (not trivial 1.03-odds picks).
+    bands = {
+        # comunes: highest hit rate available, ranked by value
+        "comun": (d[d["p"] >= 0.40].sort_values("ev", ascending=False)),
+        # moderadas: balanced risk/reward
+        "moderada": (d[(d["p"] >= 0.25) & (d["p"] < 0.40)].sort_values("ev", ascending=False)),
+        # arriesgadas: long shots with the biggest payout
+        "arriesgada": (d[d["p"] < 0.25].sort_values("ev", ascending=False)),
+    }
+
+    for tier, band in bands.items():
+        seen: set[str] = set()
+        for _, row in band.iterrows():
+            key = _clean_label_value(row.get("player_name")) or (
+                f"{row.get('match_name')}|{row.get('market_type')}|{row.get('line')}"
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            out[tier].append(
+                {
+                    "subject": _card_subject(row),
+                    "market": _card_market_label(row),
+                    "match": _clean_label_value(row.get("match_name")),
+                    "odds": float(row["odds"]),
+                    "prob": float(row["p"]),
+                    "ev": float(row["ev"]),
+                }
+            )
+            if len(out[tier]) >= per_tier:
+                break
+    return out
+
+
+def _render_bet_card(bet: dict, meta: dict) -> str:
+    prob_pct = max(0, min(100, round(bet["prob"] * 100)))
+    payout = (bet["odds"] - 1.0) * 100.0
+    return (
+        f'<div class="bb-card" style="--accent:{meta["accent"]};--accent-strong:{meta["accent_strong"]};">'
+        f'<div class="bb-card__row">'
+        f'<span class="bb-card__match">{bet["match"]}</span>'
+        f'<span class="bb-card__badge">{meta["badge"]}</span>'
+        f"</div>"
+        f'<p class="bb-card__subject">{bet["subject"]}</p>'
+        f'<p class="bb-card__market">{bet["market"]}</p>'
+        f'<div class="bb-card__stats">'
+        f"<div>"
+        f'<p class="bb-card__odds-label">Cuota</p>'
+        f'<div class="bb-card__odds-val">{bet["odds"]:.2f}</div>'
+        f"</div>"
+        f'<div class="bb-card__prob">'
+        f'<p class="bb-card__prob-label">Probabilidad</p>'
+        f'<div class="bb-card__prob-val">{prob_pct}%</div>'
+        f'<div class="bb-bar"><div class="bb-bar__fill" style="width:{prob_pct}%;"></div></div>'
+        f"</div>"
+        f"</div>"
+        f'<div class="bb-card__foot">'
+        f'<span class="bb-card__ev">EV +{bet["ev"]:.2f}</span>'
+        f'<span class="bb-card__pay">Gana <b>${payout:,.0f}</b> por cada $100</span>'
+        f"</div>"
+        f"</div>"
+    )
+
+
+def render_best_bets_hero() -> None:
+    bets = _select_best_bets(_best_bets_source(), per_tier=2)
+    total = sum(len(v) for v in bets.values())
+
+    st.markdown(
+        '<div class="bb-hero">'
+        '<p class="bb-hero__kicker">Mundial 2026 · Value Bets</p>'
+        '<h1 class="bb-hero__title">⚽ Las mejores apuestas de hoy</h1>'
+        '<p class="bb-hero__sub">Seleccionadas por probabilidad real de acierto y valor esperado.</p>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    if total == 0:
+        st.info("Todavía no hay apuestas de valor cargadas para mostrar.")
+        return
+
+    for tier in ("comun", "moderada", "arriesgada"):
+        cards = bets.get(tier, [])
+        if not cards:
+            continue
+        meta = _TIER_META[tier]
+        cards_html = "".join(_render_bet_card(b, meta) for b in cards)
+        st.markdown(
+            f'<div class="bb-band">'
+            f'<div class="bb-band__head">'
+            f'<span class="bb-band__dot" style="background:{meta["dot"]};"></span>'
+            f'<h3 class="bb-band__name">{meta["label"]}</h3>'
+            f'<span class="bb-band__tag">{meta["tag"]}</span>'
+            f"</div>"
+            f'<div class="bb-grid">{cards_html}</div>'
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1223,9 +1676,13 @@ def main() -> None:
         page_title="Betting Value Dashboard",
         page_icon="📈",
         layout="wide",
-        initial_sidebar_state="expanded",
+        initial_sidebar_state="collapsed",
     )
     require_optional_password()
+    _inject_mobile_css()
+
+    render_best_bets_hero()
+
     st.title("Odds-driven Betting Value Dashboard")
     st.caption("Live/API bookmaker markets → EV calculation. Multi-match edition.")
 
