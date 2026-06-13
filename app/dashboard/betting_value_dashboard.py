@@ -13,6 +13,7 @@ _PROJECT_ROOT = _Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in _sys.path:
     _sys.path.insert(0, str(_PROJECT_ROOT))
 
+import os
 import pathlib
 import sqlite3
 import sys
@@ -33,7 +34,8 @@ from app.betting.odds_driven import (
     write_scores_workbook,
 )
 
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 KNOWN_RUNS = [
     "today_4_matches_live_api_odds_probe",
@@ -178,6 +180,33 @@ def show_table_or_info(df: pd.DataFrame | None, label: str = "data") -> None:
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 
+def _get_app_password() -> str:
+    """Optional password gate for public deploys. Empty means public app."""
+    env_password = os.getenv("APP_PASSWORD", "").strip()
+    if env_password:
+        return env_password
+    try:
+        return str(st.secrets.get("APP_PASSWORD", "") or "").strip()
+    except Exception:
+        return ""
+
+
+def require_optional_password() -> None:
+    expected = _get_app_password()
+    if not expected:
+        return
+    if st.session_state.get("authenticated") is True:
+        return
+    st.subheader("Acceso privado")
+    password = st.text_input("Password", type="password")
+    if password == expected:
+        st.session_state["authenticated"] = True
+        st.rerun()
+    elif password:
+        st.error("Password incorrecta.")
+    st.stop()
+
+
 def _clean_label_value(value) -> str:
     if value is None or pd.isna(value):
         return ""
@@ -251,15 +280,70 @@ def _first_existing_numeric_column(df: pd.DataFrame, candidates: list[str]) -> p
     return pd.Series([pd.NA] * len(df), index=df.index, dtype="Float64")
 
 
+def _probability_to_percent(series: pd.Series) -> pd.Series:
+    """Return a probability series in percentage points for display.
+
+    Internal model columns are normally 0-1 probabilities. Some imported/manual
+    sources can already store hit rates as 0-100 values, so keep those as-is.
+    """
+    out = pd.to_numeric(series, errors="coerce")
+    non_null = out.dropna()
+    if non_null.empty:
+        return out
+    if non_null.abs().max() <= 1.0:
+        return out * 100.0
+    return out
+
+
+def _empirical_probability_column(df: pd.DataFrame) -> pd.Series:
+    """Best available empirical hit-rate for the clean VALUE table.
+
+    Prefer explicit empirical/hit-rate columns. If the current dataset only has
+    model_probability, use it as the empirical probability because this pipeline
+    computes model_probability from historical frequency samples.
+    """
+    explicit_candidates = [
+        "empirical_probability",
+        "historical_hit_rate",
+        "hit_rate",
+        "success_rate",
+        "observed_probability",
+    ]
+    for col in explicit_candidates:
+        if col in df.columns:
+            return _probability_to_percent(df[col])
+
+    ratio_candidates = [
+        ("valid_hit_count", "valid_appearance_count"),
+        ("hit_count", "sample_size"),
+        ("success_count", "sample_size"),
+        ("observed_hit_count", "sample_size"),
+    ]
+    for hit_col, sample_col in ratio_candidates:
+        if hit_col in df.columns and sample_col in df.columns:
+            hits = pd.to_numeric(df[hit_col], errors="coerce")
+            sample = pd.to_numeric(df[sample_col], errors="coerce")
+            return (hits / sample.replace(0, pd.NA)) * 100.0
+
+    # In this project model_probability is the historical-frequency probability
+    # produced by calculate_probability(), so it is the best available empirical
+    # probability when no separate hit-rate column is persisted.
+    if "model_probability" in df.columns:
+        return _probability_to_percent(df["model_probability"])
+
+    return pd.Series([pd.NA] * len(df), index=df.index, dtype="Float64")
+
+
 def build_value_display_df(df: pd.DataFrame) -> pd.DataFrame:
     """Build the clean user-facing VALUE table without changing the internal dataframe."""
     if df is None or df.empty:
-        return pd.DataFrame(columns=["Partido", "Apuesta", "Cuota Bet", "EV", "Sample Size"])
+        return pd.DataFrame(columns=["Partido", "Apuesta", "Cuota Bet", "Prob. Empírica", "EV", "Sample Size"])
 
     display = pd.DataFrame(index=df.index)
     display["Partido"] = df["match_name"] if "match_name" in df.columns else ""
     display["Apuesta"] = df.apply(_build_bet_label, axis=1)
     display["Cuota Bet"] = _first_existing_numeric_column(df, ["odds_decimal"])
+    display["Prob. Empírica"] = _empirical_probability_column(df)
     display["EV"] = _first_existing_numeric_column(df, ["expected_value", "ev"])
     display["Sample Size"] = _first_existing_numeric_column(
         df,
@@ -272,7 +356,7 @@ def build_value_display_df(df: pd.DataFrame) -> pd.DataFrame:
         ],
     ).round().astype("Int64")
 
-    display = display[["Partido", "Apuesta", "Cuota Bet", "EV", "Sample Size"]]
+    display = display[["Partido", "Apuesta", "Cuota Bet", "Prob. Empírica", "EV", "Sample Size"]]
     if "EV" in display.columns:
         display = display.sort_values("EV", ascending=False, na_position="last")
     return display.reset_index(drop=True)
@@ -293,6 +377,7 @@ def show_value_display_table(df: pd.DataFrame) -> None:
                 "Partido": st.column_config.TextColumn("Partido"),
                 "Apuesta": st.column_config.TextColumn("Apuesta", width="large"),
                 "Cuota Bet": st.column_config.NumberColumn("Cuota Bet", format="%.2f"),
+                "Prob. Empírica": st.column_config.NumberColumn("Prob. Empírica", format="%.2f%%"),
                 "EV": st.column_config.NumberColumn("EV", format="%.3f"),
                 "Sample Size": st.column_config.NumberColumn("Sample Size", format="%d"),
             },
@@ -389,7 +474,6 @@ def page_ev_ranking(
             "expected_value > 0",
             "market_mapping_status='OK'",
             "exact_market_match=1",
-            "data_completeness_status='COMPLETE'",
             "COALESCE(model_uses_proxy,0)=0",
             "COALESCE(field_mapping_status,'OK') NOT IN ('WRONG','MISSING_FIELD')",
             "COALESCE(side_line_status,'OK')='OK'",
@@ -1141,6 +1225,7 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="expanded",
     )
+    require_optional_password()
     st.title("Odds-driven Betting Value Dashboard")
     st.caption("Live/API bookmaker markets → EV calculation. Multi-match edition.")
 
