@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+from functools import lru_cache
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -976,6 +977,26 @@ def normalize_raw_odds(con: sqlite3.Connection, replace: bool = True) -> dict[st
 
 MIN_MINUTES_PLAYER = 15  # minimum appearance length counted in player prop samples
 
+_PLAYER_EVENTS_DB_CACHE: dict[tuple[str, str, int], tuple[list[float], dict]] = {}
+
+
+def _count_stat_value(raw_value: Any) -> float:
+    """
+    Coerce StatHub event-count stats to numeric values.
+
+    In statshub_player_performance_events, zero-count player stats are stored
+    mostly as NULL rather than literal 0. For every DB-backed player prop in
+    PLAYER_STAT_COLUMNS_DB (shots, SOT, fouls, cards, goals, assists, tackles,
+    passes), a valid appearance with NULL in the selected stat column must count
+    as 0, not be removed from the denominator.
+    """
+    if raw_value in (None, ""):
+        return 0.0
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        return 0.0
+
 
 def load_player_events_from_db(
     con: sqlite3.Connection, player_id: str, stat_col: str,
@@ -986,12 +1007,17 @@ def load_player_events_from_db(
 
     Returns (values, meta) where meta contains appearance diagnostics.
     """
+    cache_key = (str(player_id), stat_col, int(min_minutes))
+    cached = _PLAYER_EVENTS_DB_CACHE.get(cache_key)
+    if cached is not None:
+        values, meta = cached
+        return list(values), dict(meta)
+
     all_rows = con.execute(
         f"""
-        SELECT {stat_col}, minutes_played
+        SELECT {stat_col} AS stat_value, minutes_played
         FROM statshub_player_performance_events
         WHERE player_id = ?
-          AND {stat_col} IS NOT NULL
         ORDER BY event_date DESC, id DESC
         LIMIT 50
         """,
@@ -1015,7 +1041,10 @@ def load_player_events_from_db(
         elif mp < min_minutes:
             excluded_low += 1
         else:
-            valid_values.append(float(row[0]))
+            # Zero-count player stats are stored as NULL in StatHub, so every
+            # valid appearance must stay in the denominator and NULL must count
+            # as 0 for all DB-backed player prop stats.
+            valid_values.append(_count_stat_value(row[0]))
 
     meta = {
         "total_db_rows": total,
@@ -1025,11 +1054,18 @@ def load_player_events_from_db(
         "min_minutes_filter": min_minutes,
         "minutes_filter_status": "ok" if valid_values else "no_valid_appearances",
     }
+    _PLAYER_EVENTS_DB_CACHE[cache_key] = (list(valid_values), dict(meta))
     return valid_values, meta
 
 
-def load_raw_player_events(player_id: str) -> list[dict[str, Any]]:
-    """Load player events from raw JSON snapshot files (fallback)."""
+@lru_cache(maxsize=4096)
+def load_raw_player_events(player_id: str, min_minutes: int = MIN_MINUTES_PLAYER) -> list[dict[str, Any]]:
+    """Load player events from raw JSON snapshot files (fallback).
+
+    Keeps the same denominator rule as the DB path: valid appearances are
+    appearances with minutes >= min_minutes, and missing count stats later
+    coerce to 0.
+    """
     for directory in SNAP_DIRS:
         hits = list(directory.glob(f"perf_{player_id}*.json"))
         if not hits:
@@ -1046,7 +1082,11 @@ def load_raw_player_events(player_id: str) -> list[dict[str, Any]]:
             for item in items:
                 stats = item.get("player_statistics_event") if isinstance(item, dict) else None
                 stats = stats or item
-                if int(stats.get("minutesPlayed") or 0) > 0:
+                try:
+                    minutes_played = float(stats.get("minutesPlayed") or 0)
+                except (TypeError, ValueError):
+                    minutes_played = 0.0
+                if minutes_played >= min_minutes:
                     events.append(stats)
             return events
         except Exception:
@@ -1256,7 +1296,7 @@ def calculate_probability(con: sqlite3.Connection, row: sqlite3.Row) -> dict[str
             events_raw = load_raw_player_events(str(row["player_id"]))
             json_key = PLAYER_STAT_KEYS.get(mtype)
             if json_key:
-                values = [float(e.get(json_key) or 0) for e in events_raw]
+                values = [_count_stat_value(e.get(json_key)) for e in events_raw]
             mp_meta = {
                 "valid_appearance_count": len(values),
                 "excluded_zero_minutes_count": 0,
@@ -1347,6 +1387,8 @@ def _compute_bet_description(
 
 def calculate_ev(con: sqlite3.Connection, replace: bool = True) -> dict[str, Any]:
     ensure_schema(con)
+    _PLAYER_EVENTS_DB_CACHE.clear()
+    load_raw_player_events.cache_clear()
     if replace:
         con.execute("DELETE FROM betting_value_scores_new")
     rows = con.execute("SELECT * FROM betting_odds_normalized ORDER BY id").fetchall()
