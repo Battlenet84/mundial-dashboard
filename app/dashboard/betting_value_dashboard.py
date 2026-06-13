@@ -1631,21 +1631,32 @@ def _render_bet_card(bet: dict, meta: dict) -> str:
     )
 
 
-def render_best_bets_hero() -> None:
-    bets = _select_best_bets(_best_bets_source(), per_tier=2)
+def render_best_bets_hero(match_filter: str | None = None) -> None:
+    source = _best_bets_source()
+    if (
+        match_filter
+        and match_filter != "(all)"
+        and not source.empty
+        and "match_name" in source.columns
+    ):
+        source = source[source["match_name"] == match_filter]
+    bets = _select_best_bets(source, per_tier=2)
     total = sum(len(v) for v in bets.values())
 
+    sub = "Seleccionadas por probabilidad real de acierto y valor esperado."
+    if match_filter and match_filter != "(all)":
+        sub = f"{match_filter} · {sub}"
     st.markdown(
         '<div class="bb-hero">'
         '<p class="bb-hero__kicker">Mundial 2026 · Value Bets</p>'
         '<h1 class="bb-hero__title">⚽ Las mejores apuestas de hoy</h1>'
-        '<p class="bb-hero__sub">Seleccionadas por probabilidad real de acierto y valor esperado.</p>'
+        f'<p class="bb-hero__sub">{sub}</p>'
         "</div>",
         unsafe_allow_html=True,
     )
 
     if total == 0:
-        st.info("Todavía no hay apuestas de valor cargadas para mostrar.")
+        st.info("Todavía no hay apuestas de valor cargadas para este partido.")
         return
 
     for tier in ("comun", "moderada", "arriesgada"):
@@ -1681,7 +1692,9 @@ def main() -> None:
     require_optional_password()
     _inject_mobile_css()
 
-    render_best_bets_hero()
+    # Reserve the top slot for the hero cards; fill it after the sidebar
+    # filters are known so the cards can respect the selected match.
+    hero_container = st.container()
 
     st.title("Odds-driven Betting Value Dashboard")
     st.caption("Live/API bookmaker markets → EV calculation. Multi-match edition.")
@@ -1799,6 +1812,10 @@ def main() -> None:
             bm_df = qdf(f"SELECT DISTINCT bookmaker FROM betting_odds_raw WHERE {match_where}")
             if not bm_df.empty:
                 st.caption("Bookmaker(s): " + ", ".join(bm_df["bookmaker"].tolist()))
+
+    # Render the hero cards into the reserved top slot, honoring the match filter.
+    with hero_container:
+        render_best_bets_hero(match_filter)
 
     blocked_count = blocked_odds_mismatch_count(run_filter, match_filter)
     if blocked_count:
