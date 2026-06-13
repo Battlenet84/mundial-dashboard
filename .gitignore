@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Heavy local data not needed in Streamlit Cloud
+# Keep the slim dashboard DB committed: data/mundial.db
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

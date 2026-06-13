@@ -1,0 +1,35 @@
+[
+  {
+    "timestamp": "2026-06-11T18:32:04+00:00",
+    "endpoint": "leagues",
+    "params": {
+      "id": 1,
+      "season": 2026
+    },
+    "status_code": 200,
+    "status": "OK",
+    "source": "api"
+  },
+  {
+    "timestamp": "2026-06-11T18:32:11+00:00",
+    "endpoint": "teams",
+    "params": {
+      "league": 1,
+      "season": 2026
+    },
+    "status_code": 200,
+    "status": "OK",
+    "source": "api"
+  },
+  {
+    "timestamp": "2026-06-11T18:32:18+00:00",
+    "endpoint": "fixtures",
+    "params": {
+      "league": 1,
+      "season": 2026
+    },
+    "status_code": 200,
+    "status": "OK",
+    "source": "api"
+  }
+]

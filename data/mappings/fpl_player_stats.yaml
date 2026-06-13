@@ -1,0 +1,8 @@
+player_name: [web_name, player_name, name]
+team_name: [team, team_name]
+position: [element_type, position]
+minutes: [minutes]
+goals: [goals_scored]
+assists: [assists]
+yellow_cards: [yellow_cards]
+red_cards: [red_cards]
